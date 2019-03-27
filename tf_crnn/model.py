@@ -261,7 +261,7 @@ def crnn_fn(features, labels, mode, params):
         # Convert string label to code label
         with tf.name_scope('str2code_conversion'):
             table_str2int = tf.contrib.lookup.HashTable(
-                tf.contrib.lookup.KeyValueTensorInitializer(keys, values, key_dtype=tf.int64, value_dtype=tf.int64), -1)
+                tf.contrib.lookup.KeyValueTensorInitializer(keys, values, key_dtype=tf.int64, value_dtype=tf.int64), values[-2])
             splitted = tf.string_split(labels, delimiter='')
             values_int = tf.cast(tf.squeeze(tf.decode_raw(splitted.values, tf.uint8)), tf.int64)
             codes = table_str2int.lookup(values_int)
@@ -275,6 +275,7 @@ def crnn_fn(features, labels, mode, params):
         # ----
         # >>> Cannot have longer labels than predictions -> error
 
+        global_step = tf.train.get_or_create_global_step()
         with tf.control_dependencies([tf.less_equal(sparse_code_target.dense_shape[1], tf.reduce_max(tf.cast(seq_len_inputs, tf.int64)))]):
             loss_ctc = tf.nn.ctc_loss(labels=sparse_code_target,
                                       inputs=predictions_dict['prob'],
@@ -284,10 +285,8 @@ def crnn_fn(features, labels, mode, params):
                                       ignore_longer_outputs_than_inputs=True,  # returns zero gradient in case it happens -> ema loss = NaN
                                       time_major=True)
             loss_ctc = tf.reduce_mean(loss_ctc)
-            loss_ctc = tf.Print(loss_ctc, [loss_ctc], message='* Loss : ')
+            loss_ctc = tf.Print(loss_ctc, [loss_ctc, global_step], message='* Loss, step : ')
 
-
-        global_step = tf.train.get_or_create_global_step()
         # # Create an ExponentialMovingAverage object
         ema = tf.train.ExponentialMovingAverage(decay=0.99, num_updates=global_step, zero_debias=True)
         # Create the shadow variables, and add op to maintain moving averages
@@ -362,31 +361,36 @@ def crnn_fn(features, labels, mode, params):
     # --------------
     if mode == tf.estimator.ModeKeys.EVAL:
         with tf.name_scope('evaluation'):
-            CER = tf.metrics.mean(tf.edit_distance(sparse_code_pred[0], tf.cast(sparse_code_target, dtype=tf.int64)), name='CER')
+            CER, CER_op = tf.metrics.mean(tf.edit_distance(sparse_code_pred[0], tf.cast(sparse_code_target, dtype=tf.int64)), name='CER')
 
             # Convert label codes to decoding alphabet to compare predicted and groundtrouth words
             target_chars = table_int2str.lookup(tf.cast(sparse_code_target, tf.int64))
             target_words = get_words_from_chars(target_chars.values, seq_lengths_labels)
-            accuracy = tf.metrics.accuracy(target_words, predictions_dict['words'][0], name='accuracy')
+            accuracy, accuracy_op = tf.metrics.accuracy(target_words, predictions_dict['words'][0], name='accuracy')
 
-            eval_metric_ops = {
-                               'eval/accuracy': accuracy,
-                               'eval/CER': CER,
-                               }
             CER = tf.Print(CER, [CER], message='-- CER : ')
             accuracy = tf.Print(accuracy, [accuracy], message='-- Accuracy : ')
+            eval_metric_ops = {
+                               'eval/accuracy': (accuracy, accuracy_op),
+                               'eval/CER': (CER, CER_op),
+                               }
 
     else:
         eval_metric_ops = None
 
     export_outputs = {'predictions': tf.estimator.export.PredictOutput(predictions_dict)}
 
+    # Create a SummarySaverHook, because TF doesn't save summaries in EVAL mode
+    eval_summary_hook = tf.train.SummarySaverHook(save_steps=1,
+                                                  output_dir=parameters.output_model_dir + "/eval",
+                                                  summary_op=tf.summary.merge_all())
     return tf.estimator.EstimatorSpec(
         mode=mode,
         predictions=predictions_dict,
         loss=loss_ctc,
         train_op=train_op,
         eval_metric_ops=eval_metric_ops,
+        evaluation_hooks=[eval_summary_hook],
         export_outputs=export_outputs,
         scaffold=tf.train.Scaffold()
         # scaffold=tf.train.Scaffold(init_fn=None)  # Specify init_fn to restore from previous model

@@ -15,7 +15,7 @@ feature_spec = {
     'label': tf.FixedLenFeature([], tf.string),
     'corpus': tf.FixedLenFeature([],tf.int64)
 }
-def parse_example(serialized_example, output_shape=None):
+def parse_example(serialized_example, output_shape, data_augmentation):
     features = tf.parse_single_example(serialized_example, feature_spec)
     # Important step: remove "label" from features!
     # Otherwise our classifier would simply learn to predict
@@ -25,7 +25,8 @@ def parse_example(serialized_example, output_shape=None):
     # Replace image_raw with the decoded & preprocessed version
     image = features.pop('image_raw')
     image = tf.image.decode_png(image, channels=1)
-    image = augment_data(image)
+    if data_augmentation:
+        image = augment_data(image)
     image, orig_width = padding_inputs_width(image, output_shape, increment=CONST.DIMENSION_REDUCTION_W_POOLING)
     features['image'] = image
     features['image_width'] = orig_width
@@ -33,8 +34,9 @@ def parse_example(serialized_example, output_shape=None):
     return features, label
 
 
-def make_input_fn(files_pattern, batch_size, output_shape, dynamic_distortion=False, repeat=True):
-    shaped_parse_example = partial(parse_example, output_shape=output_shape)
+def make_input_fn(files_pattern, batch_size, output_shape,
+                  data_augmentation=False, dynamic_distortion=False, repeat=True):
+    bound_parse_example = lambda example: parse_example(example, output_shape, data_augmentation)
 
     def input_fn():
         files = tf.data.Dataset.list_files(files_pattern, shuffle=True)
@@ -44,12 +46,12 @@ def make_input_fn(files_pattern, batch_size, output_shape, dynamic_distortion=Fa
 
         # NOTE: using map_and_batch seems to decrease performance
         ds = (ds.shuffle(buffer_size=128) # small buffer since files were also shuffled
-                .map(shaped_parse_example, num_parallel_calls=4)
+                .map(bound_parse_example, num_parallel_calls=4)
                 .apply(tf.contrib.data.batch_and_drop_remainder(batch_size))
               )
         if repeat:
             ds = ds.repeat() # repeat indefinitely, and pass max_steps to the trainer
-        features, labels = ds.prefetch(2).make_one_shot_iterator().get_next()
+        features, labels = ds.prefetch(5).make_one_shot_iterator().get_next()
 
         if dynamic_distortion:
             features['image'] = tf_distortion_maps(features.get('image'), batch_size)
@@ -108,7 +110,6 @@ def augment_data(image: tf.Tensor) -> tf.Tensor:
 
         image = tf.image.random_brightness(image, max_delta=0.1)
         image = tf.image.random_contrast(image, 0.5, 1.5)
-        #image = tf_distortion_maps(image)  #deformation image by image
 
         if image.shape[-1] >= 3:
             image = tf.image.random_hue(image, 0.2)
