@@ -1,10 +1,10 @@
-# Convolutional Recurrent Neural Network in Tensorflow (tf.crnn)
-CRNN model in Tensorflow using Estimators
+# Type-aware CRNN
 
-Implementation of the Convolutional Recurrent Neural Network (CRNN) for image-based sequence recognition tasks, such as scene text recognition and OCR.
-Original paper http://arxiv.org/abs/1507.05717 and code https://github.com/bgshih/crnn
+This repository contains the code for our ICDAR'19 paper _Field typing for improved recognition on handwritten forms_ (links to come).
 
-This version uses the `tf.estimator.Estimator` to build the model.
+It is built on top of [tf_crnn](https://github.com/solivr/tf-crnn), which is a tensorflow-estimator version of the orignal Convolutional Recurrent Neural Network (CRNN) (original [paper](http://arxiv.org/abs/1507.05717) and [code](https://github.com/bgshih/crnn))
+
+We used it to sucessfully parse European Accident Statements in French, but it can be easily adapted to any use case that demands transcription of heterogeneous handwritten context.
 
 ## Installation
 
@@ -29,27 +29,67 @@ This will symlink the package in the python installation directory, so that if y
 
 ## Training
 
+### Synthetic training data
+We have created a dataset as mentioned in section III-B of our paper. It is available [here](https://drive.google.com/uc?id=1upVeN8a_sHT67rYupPs64KyIKC9_qYdO&export=download). Download and extract the zip file to a directory of your choosing, for example `~/type-aware-crnn/data/`. Then, place this path with a glob pattern in the `model_params.json` config file (see below).
+
+### Evaluation data
+Unfortunately, we cannot provide this as it contains sensitive information. It should be in the same format as the training data, namely a tfrecords file where each example has the followin `feature_spec`:
+```python
+feature_spec = {
+    'image_raw': tf.FixedLenFeature([], tf.string), # the PNG/JPG bytes
+    'label': tf.FixedLenFeature([], tf.string),     # the transcription
+    'corpus': tf.FixedLenFeature([],tf.int64),      # the type id
+}
+```
+If you are not used to generating tfrecords data, open an issue and we will support you in converting your existing dataset.
+
+### Training configuration
+
 To train, you need to provide a parameters file. An example one is `model_params.json`. You should modify at least the following paths in there:
 
-*  `"output_model_dir": "/path/to/where/model/will/save/weights/"` <-- if same as a previous training, the model will first load weights from here;
-* `"tfrecords_train": "/path/to/training/directory/trainig_files_batch*.tfrecords"` <-- a directory where you have the training dataset in `tfrecords` format. It can be a single file, or a `glob` expression
-*  `"tfrecords_eval": "/path/to/eval/directory/eval_files_batch*.tfrecords"` <-- same as above, but for validation dataset
+*  `output_model_dir`:  path to where the model will save weights, e.g. `"~/type-aware-crnn/models/french_model"`. Note that if it already contains model checkpoints from a previous training, the training will continue.
+* `tfrecords_train`: path to training data, e.g. `"~/type-aware-crnn/data/train/2M_dilgrad_train_batch_*.tfrecords"` (if you are using our synthetic data)
+*  `tfrecords_eval`: path to evaluation data e.g. `"~/type-aware-crnn/data/eval/*.tfrecords"`
 
-Documentation for other parameters: TODO. Hopefully the names are clear for now :)
-
-Then, you can start training with: `python -m tf_crnn.train <path_to_model_params.json>`
+Then, you can start training with:
+```bash
+python -m tf_crnn.train <path_to_model_params.json>
+```
 
 You can quickly modify the output directory, the GPU being used or the number of epochs by providing optional parameters to the script, which override the ones in the JSON file. See `python -m tf_crnn.train -h`
 
-### Contents
+---
+
+Documentation for other important parameters:
+ - `input_shape`: all input images are transformed to this shape to be able to form batches. Note that we the image is replicated horizontally to avoid filling the batch with white space (default: `[32, 256]`)
+ - `num_corpora`: how many different types to use (default: `10`)
+ - `gpu`: the ID of the GPU to be used (single GPU model)
+ - `n_epochs`: how many epochs to train for
+ - `learning_rate`: self explaining
+ - `learning_rate_decay` : if non-zero, then an exponentially decreasing learning rate is used with this decay rate (default: `1e-4`)
+ - `learning_rate_steps` : indicates when to decrease the LR, if the decay is defined
+ - `train_batch_size`: size of the batch for training. The bigger the batch, the more memory you need
+ - `eval_batch_size`: size of the batch for eval
+ - `save_interval`: how often to save a checkpoint
+ - `keep_prob`: when using dropout, how many to keep
+ - `evaluate_every_epoch`: how often to evaluate the model
+ - `alphabet`: one of `['digits_only', 'letters_only', 'letters_digits', 'letters_extended', 'letters_digits_extended']`. Since we train for French data, note that this contains accented characters. See `config.py`.
+ - `alphabet_decoding`: `same` or one of `alphabet`s. When decoding the predicted codes, we can choose to get a different mapping, for example to translate the codes for upper-case characters into their lower-case equivalents.
+ - `train_cnn`: `1` if you want to train the whole network; `0` if you want to train just the LSTM part.
+ - `nb_logprob` and `top_paths`: these control the output of the model. `nb_logprob` represents the width of the beam in the search algorithm. However, the model will only output the first `top_paths` out of these.
+ - `dynamic_distortion`: Whether to apply elastic distortion as a data augmentation step. Enabling this (`true`) will demand more CPU resources and can slow down training.
+
+
+
+
+
+## Contents
+
 * `model.py` : definition of the model
 * `data_handler.py` : functions for data loading, preprocessing and data augmentation
 * `config.py` : `class Params` manages parameters of model and experiments
-* `decoding.py` : helper fucntion to transform characters to words
+* `decoding.py` : helper function to transform characters to words
 * `train.py` : script to launch for training the model, more info on the parameters and options inside
-* `export_model.py`: script to export a model once trained, i.e for serving
+* `export_model.py`: script to export a model once trained, i.e for serving (prediction)
 * Extra : `hlp/numbers_mnist_generator.py` : generates a sequence of digits to form a number using the MNIST database
 * Extra : `hlp/csv_path_convertor.py` : converts a csv file with relative paths to a csv file with absolute paths
-
-
-
