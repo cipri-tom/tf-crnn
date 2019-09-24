@@ -1,6 +1,6 @@
 # Type-aware CRNN
 
-This repository contains the code for our ICDAR'19 paper _Field typing for improved recognition on handwritten forms_ (links to come).
+This repository contains the code for our ICDAR'19 paper _Field typing for improved recognition on handwritten forms_ ([arXiv](https://arxiv.org/abs/1909.10120)).
 
 It is built on top of [tf_crnn](https://github.com/solivr/tf-crnn), which is a tensorflow-estimator version of the orignal Convolutional Recurrent Neural Network (CRNN) (original [paper](http://arxiv.org/abs/1507.05717) and [code](https://github.com/bgshih/crnn))
 
