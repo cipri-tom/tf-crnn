@@ -5,6 +5,8 @@ __author__ = 'solivr'
 import tensorflow as tf
 from tensorflow.contrib.rnn import BasicLSTMCell, LSTMCell
 from tensorflow.contrib.cudnn_rnn import CudnnLSTM
+from tensorflow.keras import layers
+
 from .decoding import get_words_from_chars
 from .config import  Params, CONST
 
@@ -21,6 +23,13 @@ def biasVar(shape, value=0.0, name='bias'):
 
 def conv2d(input, filter, strides=[1, 1, 1, 1], padding='SAME', name=None):
     return tf.nn.conv2d(input, filter, strides=strides, padding=padding, name=name)
+
+
+def normalization(input_imgs: tf.Tensor) -> tf.Tensor:
+    """Linearly scales each image in input_imgs to have mean 0 and variance 1
+
+    """
+    return tf.image.per_image_standardization(input_imgs)
 
 
 def deep_cnn(input_imgs: tf.Tensor, is_training: bool, summaries: bool=True) -> tf.Tensor:
@@ -240,8 +249,8 @@ def crnn_fn(features, labels, mode, params):
     if mode != tf.estimator.ModeKeys.TRAIN:
         parameters.keep_prob_dropout = 1.0
 
-    conv = deep_cnn(features['image'], (mode == tf.estimator.ModeKeys.TRAIN), summaries=False)
-
+    norm = normalization(features['image'])
+    conv = deep_cnn(norm, (mode == tf.estimator.ModeKeys.TRAIN), summaries=False)
 
     logprob, raw_pred = deep_bidirectional_lstm(conv, features['corpus'], params=parameters, summaries=False)
 
